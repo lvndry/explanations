@@ -27,42 +27,61 @@
 <div class="f-wrap">
   <div class="f-panel">
     <p style="font-size:12px; color:var(--ink-dim); line-height:1.65; margin:0">
-      Every decision model is a model you would have <b>served</b> anyway (run behind an API so other software can call it) plus some amount of change, and the change comes in two
-      forms: <b>post-training</b>, continuing the model's <b>weights</b> on new data, or a <b>head</b>, a new
-      layer trained on top of the model's hidden state. The amount of change is the whole taxonomy:
-      how far are you from the LLM you would have served anyway? Zero (you only read a field), small
-      (you retrained the same model), structural (you bolted a new head on), or total (you swapped the
-      backbone). Each step further buys something and costs something, and the next section is just
-      picking a rung.
+      Every decision model is a model you would have <b>served</b> anyway (run behind an API so other software can call it) plus some amount of change. The change comes in two forms: <b>post-training</b>, continuing to train the model's <b>weights</b> on new data, or a <b>head</b>, a small new layer trained on top of the model's hidden state that turns it into probabilities over your options without generating text. There are 6 ways to do it, ordered by how far you move from the LLM you already serve.
     </p>
     <div class="f-axis">
-      <div class="f-rung"><button class="f-rungbtn" data-i="0">1 · logprob readout<span class="f-dist">distance: zero</span></button></div>
-      <div class="f-rung"><button class="f-rungbtn" data-i="1">2 · fine-tuned base<span class="f-dist">distance: small</span></button></div>
-      <div class="f-rung"><button class="f-rungbtn" data-i="2">3 · trained head (Jev, Clef, Kev)<span class="f-dist">distance: structural</span></button></div>
-      <div class="f-rung"><button class="f-rungbtn" data-i="3">4 · encoder (Laya)<span class="f-dist">distance: new backbone</span></button></div>
-      <div class="f-rung"><button class="f-rungbtn" data-i="4">5 · candidate head (Decision 1.0)<span class="f-dist">distance: new head, familiar backbone</span></button></div>
+      <div class="f-rung"><button class="f-rungbtn" data-i="0">1 · logprob readout<span class="f-dist">nothing changes</span></button></div>
+      <div class="f-rung"><button class="f-rungbtn" data-i="1">2 · fine-tuned LLM<span class="f-dist">same model, new weights</span></button></div>
+      <div class="f-rung"><button class="f-rungbtn" data-i="2">3 · pointer head (Kev)<span class="f-dist">new head</span></button></div>
+      <div class="f-rung"><button class="f-rungbtn" data-i="3">4 · joint schema head (Clef)<span class="f-dist">new head, many questions</span></button></div>
+      <div class="f-rung"><button class="f-rungbtn" data-i="4">5 · candidate head (Decision 1.0)<span class="f-dist">new head, free-text options</span></button></div>
+      <div class="f-rung"><button class="f-rungbtn" data-i="5">6 · encoder (Laya, Kai)<span class="f-dist">new, small backbone</span></button></div>
     </div>
     <div id="f-rungs"></div>
   </div>
 
   <div class="f-panel">
-    <div class="label">the same model family, ranked, on one benchmark</div>
+    <div class="label">where Jev sits: a hosted service whose head is not public</div>
+    <p style="font-size:12px; color:var(--ink-dim); line-height:1.65; margin:0.4rem 0 0 0">
+      Jev (TypeSafe) is the best-known decision model, and it is closed: you call an API and get probabilities back. What is known about its insides comes from one independent teardown of about 9,400 requests (Archer Hume, September 2026), and it splits cleanly into measured and guessed.
+    </p>
+    <p style="font-size:12px; color:var(--ink-dim); line-height:1.65; margin:0.4rem 0 0 0">
+      <b>Measured.</b> The shared context (the "state") is billed once however many questions you ask about it. Each question is isolated from its siblings: a secret planted in one question is invisible to another (probability 0.00), while the same secret in the shared state is found (0.90–0.92). The options inside one question do affect each other: adding a fifth option or reversing the order moves the probabilities. Asking 100 questions costs about the same latency as asking 1 (82 vs 86.5 ms). Its tokenizer matches none of 192 public ones; the closest is Qwen's. The API's <code>confidence</code> field is not P(correct) but the distance from a uniform guess, (p<sub>max</sub> − 1/K) / (1 − 1/K) for K options.
+    </p>
+    <p style="font-size:12px; color:var(--ink-dim); line-height:1.65; margin:0.4rem 0 0 0">
+      <b>Inferred, not established.</b> A decoder backbone, probably a mixture of experts; the shared state encoded once and reused by each question branch; a final-position or pointer-style head; training with an objective TypeSafe calls <b>RLCD</b> (Reinforcement Learning for Calibrated Decisions), whose recipe is unpublished. So Jev does not slot cleanly into rungs 3 to 5: what is public is its interface, not its head.
+    </p>
+  </div>
+
+  <div class="f-panel">
+    <div class="label">the same backbone, 3 mechanisms (measured by us, DecideBench, zero-shot)</div>
     <table>
-      <thead><tr><th>model</th><th>overall</th><th>pair accuracy</th></tr></thead>
+      <thead><tr><th>Qwen3.5-9B as…</th><th>accuracy / pair</th><th>ECE</th><th>order flips /400</th><th>median latency</th><th>GPU memory</th></tr></thead>
       <tbody>
-        <tr><td>DeepSeek-V4-Flash (plain LLM, readout)</td><td>99.8</td><td>99.8</td></tr>
-        <tr><td>Jev (Qwen, RLCD)</td><td>98.0</td><td>97.9</td></tr>
-        <tr><td>Kev-4B (Qwen3.5 + pointer head)</td><td>78.2</td><td>76.6</td></tr>
-        <tr><td>Jeff (Qwen3.5-2B fine-tuned)</td><td>70.0</td><td>67.6</td></tr>
-        <tr><td>Laya (0.6B encoder)</td><td>59.8</td><td>55.8</td></tr>
+        <tr><td>plain readout (rung 1)</td><td>88.5 / 78.0</td><td>0.071</td><td>39</td><td>34 ms</td><td>16.8 GiB weights + KV pool</td></tr>
+        <tr><td>Lux, candidate head (rung 5)</td><td>92.0 / 84.5</td><td>0.020</td><td>13</td><td>34 ms</td><td>15.7 GB</td></tr>
+        <tr><td>Clef-flash, schema head (rung 4)</td><td>92.7 / 86.0</td><td>0.039</td><td>0*</td><td>38 ms</td><td>18.8 GB</td></tr>
       </tbody>
     </table>
     <p class="dc-capt" style="font-size:11px; color:var(--ink-dim); margin-top:0.5rem">
-      DecideBench: 400 items written by Claude, 200 of them contrastive pairs (two near-identical items
-      that differ in one detail, which should get different labels). Pair accuracy is the harder metric:
-      getting both sides of a pair right. Read it the way it was built to be read: the plain big LLM on
-      top of the board; the specialized models earn their place in-domain, and their numbers fall off a
-      cliff outside it (Jeff: 98 on support intents, 46 on returns policy).
+      On the same 9B, a trained head adds about 4 points of accuracy and 6.5 to 8 of pair accuracy, and cuts calibration error. *Clef's 0 flips come from sorting options before encoding, not from the head (section 4). Latency: the readout ran on vLLM, the heads in plain Hugging Face transformers without the fast conv kernel, so compare the heads' latencies with each other, not with the readout. For scale, our production 27B with a plain readout scored <b>95.0 / 90.5</b> at 99 ms, beating both heads, though that mixes size with a newer model generation.
+    </p>
+  </div>
+
+  <div class="f-panel">
+    <div class="label">the smaller models (measured by us, same benchmark, RTX 5090)</div>
+    <table>
+      <thead><tr><th>model</th><th>mechanism</th><th>accuracy / pair</th><th>median latency</th><th>GPU memory</th></tr></thead>
+      <tbody>
+        <tr><td>Nox-4B</td><td>candidate head</td><td>83.5 / 69.0</td><td>27 ms</td><td>8.6 GB</td></tr>
+        <tr><td>Sol-2B</td><td>candidate head</td><td>80.5 / 62.0</td><td>20 ms</td><td>4.2 GB</td></tr>
+        <tr><td>Eos-0.8B</td><td>candidate head</td><td>73.5 / 51.0</td><td>20 ms</td><td>2.0 GB</td></tr>
+        <tr><td>Laya, 421M</td><td>encoder</td><td>59.3 / 35.5</td><td>10.7 ms</td><td>2.2 GB</td></tr>
+        <tr><td>Kai-0.6B</td><td>encoder</td><td>46.8 / 16.0</td><td>7.4 ms</td><td>2.8 GB</td></tr>
+      </tbody>
+    </table>
+    <p class="dc-capt" style="font-size:11px; color:var(--ink-dim); margin-top:0.5rem">
+      DecideBench: 400 Claude-written items, 3 to 6 options each, built as 200 contrastive pairs (two near-identical items whose one differing detail changes the right answer). Pair accuracy, getting both items of a pair right, is the metric that separates reading from pattern-matching; random guessing scores 4.5. Our Laya run reproduces the benchmark's published 59.8 / 36.5, so the harness agrees with third-party numbers. For reference, the benchmark's own leaderboard (few-shot prompt, third-party): DeepSeek-V4-Flash 99.8 / 99.5, Jev 98.0 / 96.0, Clef 27B 94.0 / 88.0, Kev-4B 78.2 / 65.5, Jeff (Qwen3.5-2B, method undocumented) 70.0 / 48.5.
     </p>
   </div>
 </div>
@@ -70,32 +89,34 @@
 <script>
 const RUNGS = [
   {
-    h: "Logprob readout — distance zero",
-    p: `<p>The baseline from section 3. No new model, no new server, no training. You read the logprobs the chat API already computes, at your prompt's answer position. It is a different *interface*, not a different model: same forward pass, same speed, same context window, same accuracy ceiling as the LLM you would have run anyway. What it adds is the margin, and what it does not fix is calibration: the number tracks the model's own beliefs, which on a new task may not track reality. Section 4 is the whole story of that gap.</p>`,
-    spec: [["model", "the one you already serve"], ["speed", "identical to the LLM"], ["context", "the LLM's, unchanged"], ["labels", "prompt text — change anytime"], ["what you give up", "calibrated probabilities, every base-model failure"]]
+    h: "1 · Logprob readout: nothing changes",
+    p: `<p>The technique from section 3. No new model, no new server, no training: you read the logprobs the server already computes at your prompt's answer position, with max_tokens set to 1. Same forward pass, same context window, same accuracy as the text answer (399 of 400 agreed on our 27B), minus the decode steps. What it adds is the margin. Calibration is whatever the base model happens to have, which section 4 showed can be good, and which you must measure.</p>`,
+    spec: [["model", "the one you already serve"], ["speed", "the LLM's prefill, no decode"], ["context", "the LLM's, unchanged"], ["labels", "prompt text, change anytime"], ["memory", "nothing new"]]
   },
   {
-    h: "Fine-tuned base — small distance",
-    p: `<p>Same architecture, same serving path, but the weights are now better at your task's prompt format. The honest data point is Jeff, a fine-tuned Qwen3.5-2B: 98% on support-intent items and 46% on returns-policy items on DecideBench. Strong inside the task family it trained on, collapsed outside it. The shape of that number is the shape of every fine-tune: it moves accuracy in your domain and portability away at the same time. You also now own a training set, and it goes stale when the domain moves.</p>`,
-    spec: [["model", "your base, retrained"], ["speed", "identical to the LLM"], ["context", "the LLM's, unchanged"], ["labels", "prompt text"], ["what you give up", "cross-domain transfer; you own a training set"]]
+    h: "2 · Fine-tuned LLM: same model, new weights",
+    p: `<p>Train the LLM itself, usually with <b>LoRA</b> (a small added set of weights instead of the whole model), on examples of your task, then read it exactly as in rung 1. Accuracy goes up on the task you trained on, and the risk is the usual one for fine-tunes: it can get worse outside that task, and you now own a training set that goes stale when the domain moves. Serving stays the same, and LoRA adapters can share one copy of the base weights on vLLM.</p>`,
+    spec: [["model", "your LLM, retrained"], ["speed", "same as rung 1"], ["context", "the LLM's"], ["labels", "prompt text, but trained on"], ["memory", "base + a small adapter"]]
   },
   {
-    h: "Trained head — structural distance. Jev, the reference implementation",
-    p: `<p>A new layer on top of a (often post-trained) backbone, trained to emit probabilities instead of tokens. This is the family with the most production detail public, so it is worth one chapter of how it actually works.</p>
-    <p><b>Jev (TypeSafe).</b> A Qwen-based model post-trained with an objective called <code>RLCD</code>, Reinforcement Learning for Calibrated Decisions: the model is trained so that the probability it *states* tracks how often it is *right*, which is the calibration property section 4 said a base LLM has no guarantee of. TypeSafe has not published the exact training recipe, so treat RLCD as a named objective with an unpublished spec. Served through a <code>/v1/decisions</code> endpoint: you send a prompt plus your labels, and it returns a <b>label logprob</b> per label, requested by name rather than read off the top of the spread, so your labels never have to be single tokens. That is the practical difference from the section-3 readout: the readout needs "Yes" and "No" to be among the ten most likely candidates, the decisions API asks for them directly by name.</p>
-    <p><b>Kev.</b> Pointer-head architecture: the model's <b>hidden state</b> is compared against a set of learned label embeddings and the best match is picked. Kev-9B runs on a 32GB-class GPU and its model card publishes a fitted temperature of 2.19 — a trained calibration constant, which is what a head family is supposed to hand you that the readout family leaves you to measure yourself.</p>
-    <p><b>Clef (Cloudflare).</b> Schema-head: one forward pass emits a whole typed object (multi-field, multi-label) with no decode. Cloudflare published what this looks like in practice: backbone frozen, LoRA adapters on top, and a training loss of label-smoothed cross-entropy plus Brier-score calibration, the first decision-model family to name its calibration recipe. Clef-omni is a Qwen3-Omni-30B-A3B mixture-of-experts that scores audio, video, images and text in the one prefill, about 130ms text / 150ms image / 1.5s for a 21-second video with audio. Weights are open, SGLang serves them from 0.5.22 (PR #42721), it speaks the Jev API (a model-ID swap), and Clef-flash is $0.038 per million input tokens hosted, 24k context hosted versus 256k in the self-hosted weights.</p>`,
-    spec: [["model", "vendor's, or yours with a head"], ["speed", "the backbone's forward pass — no speed gain"], ["context", "the backbone's"], ["labels", "head / request, per family"], ["what you give up", "a second artifact to version; the label space is a trained boundary"]]
+    h: "3 · Pointer head: Kev",
+    p: `<p>A small head reads the model's hidden state and compares it against a representation of each option, picking the best match. Kev (open, sizes 0.5B to 27B) puts a pointer head and a LoRA adapter on a Qwen3.5 base, and its model card warns that the fitted sampling temperature must be refit on your own workload. That warning is the point: even a trained head's probabilities need calibrating per task, and we refit ours to 1.0 after measuring.</p>`,
+    spec: [["model", "base LLM + adapter + head"], ["speed", "one forward pass"], ["context", "the backbone's"], ["labels", "options in the request"], ["memory", "the backbone's, plus MBs"]]
   },
   {
-    h: "Encoder — new backbone. Laya",
-    p: `<p>The only rung that changes the speed class. An <b>encoder</b> reads the whole input in one pass and emits one representation; it decodes no tokens, so there is no decode loop and no grammar-constrained sampling. Laya (Laya AI, 0.6B, 512-token window) does 2-6 ms per decision and 60+ queries per second on an 8GB GPU, which is two to three orders of magnitude below a 27B decode. The cost is written all over its benchmark numbers: BANKING77 0.363 zero-shot, 0.766 fine-tuned. It must be fine-tuned per domain to be useful, its 512-token ceiling excludes long conversations (a hospital front-desk page or an Ultron turn page will not fit), and it cannot write a sentence, only score. Speed is real and the price is real too.</p>`,
-    spec: [["model", "0.6B encoder, yours to fine-tune"], ["speed", "2-6 ms — 100-300x below an LLM"], ["context", "512 tokens"], ["labels", "retrain"], ["what you give up", "long context, generative output, cross-domain reuse"]]
+    h: "4 · Joint schema head: Clef",
+    p: `<p>One prompt carries the shared context plus every question, and the head scores every option of every question in one pass, returning a whole typed object. Cloudflare's Clef sits on a Qwen3.8-27B base (Clef-flash on a 9B), with the backbone frozen and LoRA adapters trained with label-smoothed cross-entropy plus a Brier calibration term. Weights are open. One trap for on-prem use: Clef is a fine-tune of the base 27B, not of our uncensored variant, so it cannot share weights with our production model and needs its own GPU memory.</p>`,
+    spec: [["model", "base LLM + LoRA + head"], ["speed", "one forward pass for all questions"], ["context", "the backbone's (256k self-hosted)"], ["labels", "schema in the request"], ["memory", "9B: 18.8 GB loaded"]]
   },
   {
-    h: "Candidate head — familiar backbone, trained head. Decision 1.0",
-    p: `<p>vLLM's Semantic Router shipped six open models (Apache 2.0) in September 2026: Kai, Lex (0.6B encoders) and Eos, Sol, Nox, Lux (Qwen3.5 backbones from 0.8B to 9B with a shared candidate head). A <b>candidate head</b> scores free-text candidate descriptions you send in each request, one forward pass, 16k context. That is the hybrid slot: you keep the LLM's context window and the open, prompt-time label space, and you trade away decode and get a TypeSafe-SDK-compatible API (<code>/v1/systemone</code>) on top of vLLM. On their own 54-task suite: Jev 81.05, Lux-9B 76.94, Kev-9B 71.89, which is a different benchmark from DecideBench and only comparable within its own rows.</p>`,
-    spec: [["model", "Qwen3.5 + shared candidate head"], ["speed", "one forward pass, no decode"], ["context", "16k"], ["labels", "free text, in the request"], ["what you give up", "a second model to train, version, serve"]]
+    h: "5 · Candidate head: Decision 1.0",
+    p: `<p>vLLM's Semantic Router team released 6 open models (Apache 2.0) in September 2026: two 0.6B encoders (Kai, Lex) and four Qwen3.5 decoders from 0.8B to 9B (Eos, Sol, Nox, Lux) sharing one candidate head. A candidate head scores free-text option descriptions you send with each request, all options in one forward pass, up to 16k tokens. It is served on vLLM at <code>/v1/systemone</code>, compatible with the TypeSafe SDK. On their own 54-task suite: Jev 81.05, Lux-9B 77.40, Kev-9B 71.89, plain Qwen3.5-9B 69.73.</p>`,
+    spec: [["model", "Qwen3.5 + shared head"], ["speed", "one forward pass"], ["context", "16k"], ["labels", "free text, in the request"], ["memory", "2 GB (0.8B) to 15.7 GB (9B)"]]
+  },
+  {
+    h: "6 · Encoder: Laya, Kai",
+    p: `<p>A small <b>encoder</b> reads the input in one pass and scores each option; it never generates text. This is the cheapest rung: in our runs 7 to 11 ms and 2 to 3 GB of GPU memory, against 99 ms for the 27B readout, so about 10 times faster, not the 100s of times that comparisons against full text generation suggest. The price shows on contrastive pairs: 16 to 36% pair accuracy, close to guessing, and 61 to 82 order flips out of 400. Laya reads 512 tokens (1,024 for its typed-decisions checkpoint), so a long conversation does not fit. Encoders earn their place after fine-tuning on a fixed, high-volume label set, not zero-shot.</p>`,
+    spec: [["model", "0.4 to 0.6B encoder"], ["speed", "7 to 11 ms measured"], ["context", "512 to 1,024 tokens"], ["labels", "options in the request; fine-tune for accuracy"], ["memory", "2 to 3 GB"]]
   }
 ];
 const host = document.getElementById('f-rungs');

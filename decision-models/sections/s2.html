@@ -52,8 +52,9 @@
         <button class="dc-btn" id="reset">reset</button>
         <span class="dc-capt" id="stepname">0 / 4</span>
       </div>
+      <div class="dc-capt" id="stepdesc" style="margin-top:0.5rem;min-height:2.6em"></div>
     </div>
-    <figcaption class="dc-capt">Four steps: prefill reads the conversation once, scoring produces the spread, decode draws one token, and the caller gets whatever the interface returns. Click "step" to walk through.</figcaption>
+    <figcaption class="dc-capt">Four steps: prefill reads the conversation once, scoring produces the spread, decode turns the spread into one word, and the readout hands you the spread itself. Click "step" to walk through.</figcaption>
   </figure>
 
   <div class="dc-row">
@@ -63,7 +64,7 @@
         <div class="dc-bar" id="rowYes"><span class="dc-barname">Yes</span><div class="dc-bartrack"><div class="dc-barfill" id="bYes"></div></div><span class="dc-barval" id="vYes"></span></div>
         <div class="dc-bar" id="rowNo"><span class="dc-barname">No</span><div class="dc-bartrack"><div class="dc-barfill" id="bNo"></div></div><span class="dc-barval" id="vNo"></span></div>
       </div>
-      <p class="dc-capt" style="margin-top:0.7rem">This is the distribution the model actually computed for this prompt, from a real call. It does not move when you sample, when you change temperature, or when you re-roll the answer. The slider below does not reshape it, it changes the odds the draw uses.</p>
+      <p class="dc-capt" style="margin-top:0.7rem">This is the distribution the model actually computed for this prompt, from a real call. It does not move when you sample, when you change temperature, or when you re-roll the answer. The temperature slider does not reshape it; it only changes the odds the text interface draws with.</p>
     </div>
 
     <div class="dc-col dc-panel">
@@ -73,11 +74,12 @@
         <button class="dc-btn" id="modeLog">logprob readout</button>
       </div>
       <div class="dc-sliderrow">
-        <span>temperature</span><input type="range" id="temp" min="0" max="100" value="70"><span id="tval">0.7</span>
+        <span>temperature</span><input type="range" id="temp" min="0" max="100" value="0"><span id="tval">0.0</span>
       </div>
       <div class="dc-out" id="out"><span class="dc-muted">step to the decode step to see what comes back</span></div>
+      <p class="dc-capt" style="margin-top:0.5rem">At temperature 0 the text interface always takes the most likely word (greedy decoding). Above 0 it draws a word at random, weighted by the odds, so the less likely word comes out some of the time.</p>
       <div class="dc-lp" id="lp" hidden>
-        The response also carried, next to the sampled word:<br>
+        The logprobs at the answer position:<br>
         <b>logprob(Yes) = −0.576</b> → P(Yes) = <b>0.562</b><br>
         <b>logprob(No) = −0.825</b> → P(No) = <b>0.438</b>
       </div>
@@ -92,6 +94,39 @@
       <li><b>Decode:</b> the API draws one token from the spread, shaped by temperature, and emits it as text. The draw is a coin weighted by the spread, and 0.562 is a coin that lands both ways. The text is a sample from the spread, not the spread.</li>
       <li><b>The readout:</b> the API returns the logprob of each top candidate alongside the sample. Read it, and 0.562 comes back with the answer. That is all the technique is: a field you were allowed to have.</li>
     </ol>
+  </div>
+
+  <div class="dc-panel">
+    <div class="label">where the time goes (measured on our 27B, one request at a time)</div>
+    <p style="font-size:12px;color:var(--ink-dim);line-height:1.65;margin:0.5rem 0 0 0">
+      Prefill reads every prompt token; decode adds one step per output token. For a one-token answer the bill is almost all prefill, and prefill grows faster than the prompt does:
+    </p>
+    <table style="margin-top:0.6rem">
+      <thead><tr><th>prompt tokens</th><th>first read (cold)</th><th>same context, new question (warm)</th></tr></thead>
+      <tbody>
+        <tr><td>626</td><td>~110 ms</td><td>~115 ms (no cache hit)</td></tr>
+        <tr><td>2,323</td><td>~320 ms</td><td>~325 ms (no cache hit)</td></tr>
+        <tr><td>9,317</td><td>~1.34 s</td><td>~0.46 s</td></tr>
+        <tr><td>36,862</td><td>~6.35 s</td><td>~0.49 s</td></tr>
+        <tr><td>115,950</td><td>~30.2 s</td><td>~0.97 s</td></tr>
+      </tbody>
+    </table>
+    <p style="font-size:12px;color:var(--ink-dim);line-height:1.65;margin:0.5rem 0 0 0">
+      Three readings. <b>Decode is cheap here</b>: generating the letter plus an end token instead of reading the logprob cost about 50 ms on a short prompt (147 vs 99 ms on 400 benchmark items) and 20 to 50 ms on long ones. <b>Long context is expensive the first time</b>: cold throughput falls from about 7,000 tokens/s at 9k tokens to about 3,800 at 116k, because full attention is quadratic in length. <b>Reuse is the lever</b>: the server keeps the prefill of a prompt prefix (prefix caching), so a second question about the same 116k-token transcript costs about 1 s instead of 30 s, if the transcript comes first, stays byte-identical, and the question comes last.
+    </p>
+    <p style="font-size:12px;color:var(--ink-dim);line-height:1.65;margin:0.5rem 0 0 0">
+      A catch specific to our model: it is a hybrid, where 48 of its 64 layers are recurrent (a fixed-size state instead of a growing KV cache) and only 16 use full attention. vLLM can only cache that recurrent state in whole blocks of 1,584 tokens, and in our runs the hit was always one block short. Prompts under about 3,200 tokens never hit the cache at all, which is why the first two rows have no warm speed-up. The same state costs about 148 MiB per running request whatever its length, so for short decisions it is the state, not the prompt, that caps how many run at once.
+    </p>
+  </div>
+
+  <div class="dc-panel">
+    <div class="label">where the confidence number comes from (it is the weights, nothing else)</div>
+    <p style="font-size:12px;color:var(--ink-dim);line-height:1.65;margin:0.5rem 0 0 0">
+      The 0.562 is not an extra certainty dial the model rates itself with. It is computed, in one final matrix multiply, from the model's learned <b>output weights</b>: the hidden state at the answer position is multiplied by a learned matrix that has one row per token in the vocabulary, and the row for "Yes" comes out 0.562 after normalization, the row for "No" 0.438. The weights that learned how to continue this text are the same weights you are reading when you read the probability. There is no separate confidence module.
+    </p>
+    <p style="font-size:12px;color:var(--ink-dim);line-height:1.65;margin:0.5rem 0 0 0">
+      Two things it is not. <b>Not quantization</b>: FP8 or INT8, the compressed storage the model is served in, is how the weights are held in memory, not what produces the number; an FP8 build usually moves the spread only a little, but on a borderline row a little can cross a threshold, so re-measure whenever the checkpoint changes. (The numbers on this page come from the model we serve, <code>Qwen3.8-27B-Uncensored-FP8</code>: an uncensored fine-tune, which is known to shift output distributions. Treat every probability here as a fact about that variant.) <b>Not a weight you can tune</b>: the only knob that touches the spread is temperature, and it applies at sampling time, after the number exists. The reason the number is usable as confidence at all is that the output weights were trained by next-token prediction over trillions of tokens, so they put high scores on correct continuations; the size of the scores is a byproduct of that training, which is exactly why a base model can be confident and wrong (section 4 measures the gap).
+    </p>
   </div>
 </div>
 
@@ -113,61 +148,82 @@ const stepBtn = document.getElementById('step');
 const out = document.getElementById('out');
 const lp = document.getElementById('lp');
 let step = 0, mode = 'txt', drawn = null;
+const STEPS = [
+  'Click "step" to start.',
+  'Prefill: the model reads every token of the prompt in one pass and stores its work in the KV cache.',
+  'Scoring: at the answer position the final layer scores every token in the vocabulary, and softmax turns the scores into a spread. Yes 0.562, No 0.438.',
+  'Decode: the text interface turns the spread into one word. At temperature 0 that is always the most likely word; above 0 it is a weighted random draw. Try the slider, and click the word to draw again.',
+  'Readout: ask for the logprobs at the same position and you get the spread itself, 0.562 and 0.438, not just the word. That is the whole technique.'
+];
 
 function T() { return document.getElementById('temp').value / 100; }
-function tPy() { // sampling-time P(Yes) at current temperature
-  const t = T();
-  if (t === 0) return PY > 0.5 ? 1 : 0;
-  const a = Math.exp(Math.log(PY) / t), b = Math.exp(Math.log(1 - PY) / t);
-  return a / (a + b);
+function tPy() {
+  const temperature = T();
+  if (temperature === 0) return PY > 0.5 ? 1 : 0;
+  const yesWeight = Math.exp(Math.log(PY) / temperature), noWeight = Math.exp(Math.log(1 - PY) / temperature);
+  return yesWeight / (yesWeight + noWeight);
 }
 function roll() { drawn = Math.random() < tPy() ? 'Yes' : 'No'; }
+function setMode(next) {
+  mode = next;
+  document.getElementById('modeTxt').style.borderColor = mode === 'txt' ? 'var(--accent)' : 'var(--line)';
+  document.getElementById('modeLog').style.borderColor = mode === 'log' ? 'var(--accent)' : 'var(--line)';
+}
 function render() {
-  document.getElementById('tval').textContent = T().toFixed(1);
+  const temperature = T();
+  document.getElementById('tval').textContent = temperature.toFixed(1);
   stepname.textContent = step + ' / 4';
+  document.getElementById('stepdesc').textContent = STEPS[step];
   stepBtn.disabled = step >= 4;
-  // prefill
-  const nRead = step === 0 ? 0 : PROMPT.length;
-  tokEls.forEach((el, i) => el.classList.toggle('read', i < nRead));
-  cache.style.width = (step === 0 ? 0 : 100) + '%';
-  // bars: appear at scoring step, frozen at measured values
-  const on = step >= 2;
-  document.getElementById('rowYes').classList.toggle('on', on);
-  document.getElementById('rowNo').classList.toggle('on', on);
-  document.getElementById('bYes').style.width = (on ? PY * 100 : 0) + '%';
-  document.getElementById('bNo').style.width = (on ? (1 - PY) * 100 : 0) + '%';
-  document.getElementById('vYes').textContent = on ? PY.toFixed(3) : '';
-  document.getElementById('vNo').textContent = on ? (1 - PY).toFixed(3) : '';
-  // interface
+  tokEls.forEach(el => el.classList.toggle('read', step >= 1));
+  cache.style.width = (step >= 1 ? 100 : 0) + '%';
+  const scored = step >= 2;
+  document.getElementById('rowYes').classList.toggle('on', scored);
+  document.getElementById('rowNo').classList.toggle('on', scored);
+  document.getElementById('bYes').style.width = (scored ? PY * 100 : 0) + '%';
+  document.getElementById('bNo').style.width = (scored ? (1 - PY) * 100 : 0) + '%';
+  document.getElementById('vYes').textContent = scored ? PY.toFixed(3) : '';
+  document.getElementById('vNo').textContent = scored ? (1 - PY).toFixed(3) : '';
   lp.hidden = mode !== 'log' || step < 3;
   if (step < 3) {
     out.innerHTML = '<span class="dc-muted">step to the decode step to see what comes back</span>';
-  } else if (mode === 'txt') {
-    if (step === 3 && drawn === null) roll();
-    const w = document.createElement('span');
-    w.className = 'dc-word rollable' + (step === 3 ? ' rolled' : '');
-    w.textContent = drawn;
-    w.title = 'click to draw again';
-    w.onclick = () => { roll(); w.classList.remove('rolled'); void w.offsetWidth; w.classList.add('rolled'); render(); };
-    out.innerHTML = '';
-    out.appendChild(w);
-    const note = document.createElement('span');
-    note.className = 'dc-muted';
-    const pDraw = drawn === 'Yes' ? tPy() : 1 - tPy();
-    note.innerHTML = '&nbsp;&nbsp;← the only thing you got. One draw at T = ' + T().toFixed(1) + ', where ' + drawn + ' had odds ' + pDraw.toFixed(3) + '. ' + (drawn === 'Yes'
-      ? 'It landed on the most likely token. Re-roll enough and eventually it will not.'
-      : 'The most likely token was Yes, but the draw landed on No. At these odds that happens on a large share of draws, and the chart on the left never moved. The text is the only signal you got.') + ' Click the word to draw again.';
-    out.appendChild(note);
+    return;
+  }
+  if (drawn === null) roll();
+  out.innerHTML = '';
+  const word = document.createElement('span');
+  word.className = 'dc-word' + (mode === 'txt' ? ' rollable rolled' : '');
+  word.textContent = mode === 'log' ? 'P(Yes) = ' + PY.toFixed(3) : drawn;
+  out.appendChild(word);
+  const note = document.createElement('span');
+  note.className = 'dc-muted';
+  if (mode === 'log') {
+    note.innerHTML = '&nbsp;&nbsp;← the number itself, the same at any temperature. A "Yes" at 0.562 and a "Yes" at 0.997 are different decisions; only the readout lets you tell them apart.';
+  } else if (temperature === 0) {
+    note.innerHTML = '&nbsp;&nbsp;← greedy: the most likely word, every time. Correct, but it says nothing about the model being only 56% sure.';
   } else {
-    if (step === 3 && drawn === null) roll();
-    out.innerHTML = '<span class="dc-word">' + drawn + '</span> <span class="dc-muted">← the same word ' + (drawn === 'Yes' ? '' : ', even though it was the less likely token ') + ', and this time the number came with it</span>';
+    const odds = drawn === 'Yes' ? tPy() : 1 - tPy();
+    note.innerHTML = '&nbsp;&nbsp;← one random draw at temperature ' + temperature.toFixed(1) + ', where ' + drawn + ' had odds ' + odds.toFixed(3) + '. ' + (drawn === 'Yes'
+      ? 'It landed on the most likely word this time; draw again and sometimes it will not.'
+      : 'The model preferred Yes, but a weighted draw lands on the less likely word some of the time. The spread on the left did not move.') + ' Click the word to draw again.';
+  }
+  out.appendChild(note);
+  if (mode === 'txt') {
+    word.title = 'click to draw again';
+    word.onclick = () => { roll(); render(); };
   }
 }
-stepBtn.onclick = () => { if (step < 4) { step++; if (step === 3) drawn = null; render(); } };
-document.getElementById('reset').onclick = () => { step = 0; drawn = null; render(); };
-document.getElementById('temp').oninput = render;
-document.getElementById('modeTxt').onclick = () => { mode = 'txt'; document.getElementById('modeTxt').style.borderColor = 'var(--accent)'; document.getElementById('modeLog').style.borderColor = 'var(--line)'; render(); };
-document.getElementById('modeLog').onclick = () => { mode = 'log'; document.getElementById('modeLog').style.borderColor = 'var(--accent)'; document.getElementById('modeTxt').style.borderColor = 'var(--line)'; render(); };
+stepBtn.onclick = () => {
+  if (step >= 4) return;
+  step++;
+  if (step === 3) { drawn = null; setMode('txt'); }
+  if (step === 4) setMode('log');
+  render();
+};
+document.getElementById('reset').onclick = () => { step = 0; drawn = null; document.getElementById('temp').value = 0; setMode('txt'); render(); };
+document.getElementById('temp').oninput = () => { if (step >= 3) roll(); render(); };
+document.getElementById('modeTxt').onclick = () => { setMode('txt'); render(); };
+document.getElementById('modeLog').onclick = () => { setMode('log'); render(); };
 render();
 </script>
 </body>

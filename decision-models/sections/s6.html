@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html>
+<head><link rel="stylesheet" href="../frame/tokens.css"><script src="../frame/frame.js"></script>
+<meta charset="utf-8">
+<style>
+  .pk-wrap { display: flex; flex-direction: column; gap: 0.9rem; }
+  .pk-panel { padding: 0.9rem; }
+  .pk-prose { font-size: 12px; color: var(--ink-dim); line-height: 1.65; }
+  .pk-toggle { display: flex; gap: 0.4rem; flex-wrap: wrap; margin-top: 0.6rem; }
+  .pk-barrow { display: grid; grid-template-columns: minmax(9rem, 14rem) 1fr 4.2rem; gap: 0.6rem; align-items: center; margin-bottom: 0.55rem; }
+  .pk-barname { font-size: 11px; color: var(--ink-dim); }
+  .pk-barname b { color: var(--ink); font-weight: 600; }
+  .pk-bartrack { height: 16px; background: var(--raised); border-radius: 4px; overflow: hidden; }
+  .pk-barfill { height: 100%; background: var(--accent); transition: width 0.4s; }
+  .pk-barfill.dim { background: var(--muted); }
+  .pk-barval { font-size: 11px; color: var(--ink); text-align: right; }
+  .pk-callout { padding: 0.6rem 0.9rem; border-left: 3px solid var(--accent); background: var(--raised); border-radius: 0 6px 6px 0; font-size: 12px; color: var(--ink-dim); line-height: 1.6; }
+  .pk-stepnum { display: inline-block; min-width: 1.3rem; text-align: center; font-size: 11px; color: var(--bg); background: var(--accent); border-radius: 4px; padding: 0.05rem 0.3rem; margin-right: 0.4rem; }
+</style>
+</head>
+<body>
+<div class="pk-wrap">
+  <div class="pk-panel">
+    <div class="label">what you are optimizing</div>
+    <p class="pk-prose" style="margin-top:0.5rem">
+      Stated plainly, the objective is: <b>best confidence first, then as fast and as cheap as possible</b>.
+      Speed and cost are secondary filters applied to models that already clear a confidence bar. That
+      ordering matters, because it turns "which model is best" (which no public benchmark can answer for
+      your task) into a two-stage filter that you can actually run.
+    </p>
+  </div>
+
+  <div class="pk-panel">
+    <div class="label">the shared yardstick: DecideBench (cross-domain, not yours)</div>
+    <p class="pk-prose" style="margin-top:0.5rem">
+      The one benchmark every model here has been run on is DecideBench, 400 items, 200 of them contrastive
+      pairs. Toggle the metric. Two sources are mixed, and labelled: the benchmark's own leaderboard (third-party, few-shot prompt) and our runs (zero-shot, the 27B on our production server, the rest on our RTX 5090). Our Laya run reproduced the board's 59.8 / 36.5 within a point, so the two line up.
+    </p>
+    <div class="pk-toggle">
+      <button class="dc-btn" data-m="overall" style="border-color:var(--accent)">overall accuracy</button>
+      <button class="dc-btn" data-m="pair">pair accuracy (harder)</button>
+    </div>
+    <div id="bars" style="margin-top:0.9rem"></div>
+    <p class="dc-capt" style="font-size:11px;color:var(--ink-dim);margin-top:0.5rem">
+      The spread this table hides: Jeff (Qwen3.5-2B), 70.0 overall, is 98.0 on support-intent items and 46.0 on
+      returns-policy items. Part of that is the task, not the model: returns policy was our 27B's weakest family too (86%, against 100% on support intent). Either way, an overall score is a prior for your task, not a verdict. The number that counts is the one you measure on your own items, and section 7's recipe is how.
+    </p>
+  </div>
+
+  <div class="pk-panel">
+    <div class="label">the operational comparison (real models, real numbers where one exists)</div>
+    <table style="margin-top:0.6rem">
+      <thead>
+        <tr><th>model</th><th>DecideBench acc / pair</th><th>latency per decision</th><th>context</th><th>labels</th><th>GPU memory on-prem</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Our 27B, readout (plain LLM, Uncensored FP8 variant)</td><td>95.0 / 90.5 (ours)</td><td>99 ms (ours, vLLM)</td><td>262k as served</td><td>prompt text</td><td>none new: already loaded</td></tr>
+        <tr><td>DeepSeek-V4-Flash, plain LLM</td><td>99.8 / 99.5 (board)</td><td>1,866 ms (board, hosted)</td><td>the model's</td><td>prompt text</td><td>too large for our box</td></tr>
+        <tr><td>Jev (TypeSafe, hosted; head unpublished)</td><td>98.0 / 96.0 (board)</td><td>57–86 ms server-reported (teardown)</td><td>~32k per question</td><td>decision API, by name</td><td>hosted only</td></tr>
+        <tr><td>Clef 27B (Cloudflare, joint schema head)</td><td>94.0 / 88.0 (board)</td><td>484 ms (board, hosted)</td><td>256k self-hosted</td><td>typed schema, one pass</td><td>~55 GB in bf16: does not fit beside production</td></tr>
+        <tr><td>Clef-flash 9B (joint schema head)</td><td>92.7 / 86.0 (ours); 85.2 / 72.0 (board)</td><td>38 ms (ours, transformers)</td><td>256k self-hosted</td><td>typed schema, one pass</td><td>18.8 GB</td></tr>
+        <tr><td>Lux-9B (Decision 1.0, candidate head)</td><td>92.0 / 84.5 (ours)</td><td>34 ms (ours, transformers)</td><td>16k</td><td>free text, in the request</td><td>15.7 GB</td></tr>
+        <tr><td>Kev-4B (pointer head)</td><td>78.2 / 65.5 (board)</td><td>one pass, not measured by us</td><td>the backbone's</td><td>options in the request</td><td>~8 GB class (4B)</td></tr>
+        <tr><td>Jeff Qwen3.5-2B (method undocumented)</td><td>70.0 / 48.5 (board)</td><td>52 ms (board, self-hosted)</td><td>the model's</td><td>prompt text</td><td>~4 GB class (2B)</td></tr>
+        <tr><td>Laya (421M encoder)</td><td>59.3 / 35.5 (ours); 59.8 / 36.5 (board)</td><td>10.7 ms (ours, RTX 5090)</td><td>512 tokens</td><td>options in the request</td><td>2.2 GB</td></tr>
+      </tbody>
+    </table>
+    <p class="dc-capt" style="font-size:11px;color:var(--ink-dim);margin-top:0.5rem">
+      Where we have no number, the cell says so instead of inventing one. Latencies come from different stacks (hosted APIs, vLLM, plain transformers without the fast conv kernel) and only compare within a stack. On our box, GPU 0 (96 GB) runs production at 0.7 of its memory and leaves about 28 GB: anything up to 9B fits beside it, a second 27B does not. And because Clef 27B is a fine-tune of the <i>base</i> Qwen3.8-27B, not our uncensored variant, it cannot share production's weights.
+    </p>
+  </div>
+
+  <div class="pk-panel">
+    <div class="pk-callout">
+      <b>Plain words on "accuracy below what you need, serving stack fixed".</b> The serving stack is the
+      software that runs the model and exposes the API: vLLM, Ollama, or a hosted endpoint.
+      "Fixed" means you cannot change it: you must stay on the model and the runner that are already
+      deployed (for us: a 24B on Ollama in production). When that model's accuracy on your task is below
+      your bar and you cannot swap the model or the runner, the only levers left are ones that do not
+      touch the serving: fine-tune the weights of the model you already run, or add a head to it.
+      Everything else in this table requires moving the serving, which is the expensive-to-reverse
+      decision.
+    </div>
+  </div>
+
+  <div class="pk-panel">
+    <div class="label">the pick rule, as a two-stage filter</div>
+    <ol class="steps" style="margin-top:0.6rem">
+      <li><span class="pk-stepnum">1</span><b>Measure candidates on your own labeled set.</b> A few hundred labeled examples of your actual task. Run every candidate that could plausibly pass, readout included, and record accuracy and Brier at your intended threshold. The DecideBench column above is a prior to order the queue, not the verdict: the 98-to-46 cliff on Jeff is what happens when a number from the wrong domain gets treated as a verdict.</li>
+      <li><span class="pk-stepnum">2</span><b>Set the confidence bar.</b> The accuracy you require at your threshold, with the Brier score confirming the probabilities are honest (section 4). This is the first filter. Models that do not clear it are out, regardless of speed or price.</li>
+      <li><span class="pk-stepnum">3</span><b>Among the survivors, take the smallest, fastest, cheapest, counting what is already running.</b> On our own GPUs "cheapest" means GPU memory and request slots, not a per-call price: a readout on the 27B we already serve costs no new memory, while a 9B head costs 16 to 19 GB of the 28 GB left. A small model that clears the bar wins on latency (an encoder ran about 10 times faster than the 27B readout in our runs, not 100s of times), if your prompts fit its window and your labels are stable.</li>
+    </ol>
+    <p class="pk-prose" style="margin-top:0.7rem">
+      The usual result of running the filter honestly is not one model, it is a split: the fixed-label,
+      high-volume path on the smallest model that cleared the bar (often the encoder or the 2B), and the
+      long tail, the new-label questions, and the borderline band on the readout. The readout's margins
+      from the first system become the evaluation set for the second, which is how the split earns its
+      keep instead of being a guess.
+    </p>
+    <p class="pk-prose" style="margin-top:0.7rem">
+      One rule before any of it: <b>decompose the slow or costly call before you buy a rung.</b> "Our
+      router is slow" is a symptom, not a bottleneck. If the cost is prefill (long prompts), the readout does not shrink it; reuse does (prefix caching: a second question about the same 116k-token transcript took about 1 s instead of 30 s), and so do a shorter prompt or a smaller model. If it is a serial pipeline (many
+      sequential calls), you need batching or parallelism, and the decision model only changes what you
+      call in each step. If it is decode (long rambly answers), then the readout or a head genuinely
+      removes it, because the answer becomes one token or no tokens at all. The Ultron section applies
+      exactly this, and finds that the 128 s has never been split, so the first step is a profile.
+    </p>
+  </div>
+</div>
+
+<script>
+const ROWS = [
+  { name: "DeepSeek-V4-Flash (plain LLM, board)", overall: 99.8, pair: 99.5, dim: true },
+  { name: "Jev (hosted, board)", overall: 98.0, pair: 96.0, dim: true },
+  { name: "Our 27B readout (plain LLM, ours)", overall: 95.0, pair: 90.5, dim: false },
+  { name: "Clef 27B (schema head, board)", overall: 94.0, pair: 88.0, dim: true },
+  { name: "Clef-flash 9B (schema head, ours)", overall: 92.7, pair: 86.0, dim: false },
+  { name: "Lux-9B (candidate head, ours)", overall: 92.0, pair: 84.5, dim: false },
+  { name: "Qwen3.5-9B readout (plain LLM, ours)", overall: 88.5, pair: 78.0, dim: false },
+  { name: "Kev-4B (pointer head, board)", overall: 78.2, pair: 65.5, dim: true },
+  { name: "Jeff Qwen3.5-2B (board)", overall: 70.0, pair: 48.5, dim: true },
+  { name: "Laya 421M (encoder, ours)", overall: 59.3, pair: 35.5, dim: false },
+];
+const host = document.getElementById('bars');
+ROWS.forEach(r => {
+  const d = document.createElement('div');
+  d.className = 'pk-barrow';
+  d.innerHTML = '<div class="pk-barname"><b>' + r.name.split(' (')[0] + '</b><br><span style="color:var(--muted)">' + r.name.match(/\(([^)]+)\)/)?.[1] + '</span></div>' +
+    '<div class="pk-bartrack"><div class="pk-barfill' + (r.dim ? ' dim' : '') + '"></div></div>' +
+    '<div class="pk-barval"></div>';
+  host.appendChild(d);
+});
+function setM(m) {
+  ROWS.forEach((r, i) => {
+    host.children[i].querySelector('.pk-barfill').style.width = r[m] + '%';
+    host.children[i].querySelector('.pk-barval').textContent = r[m].toFixed(1);
+  });
+  document.querySelectorAll('.pk-toggle .dc-btn').forEach(b =>
+    b.style.borderColor = b.dataset.m === m ? 'var(--accent)' : 'var(--line)');
+}
+document.querySelectorAll('.pk-toggle .dc-btn').forEach(b => b.onclick = () => setM(b.dataset.m));
+setM('overall');
+</script>
+</body>
+</html>
