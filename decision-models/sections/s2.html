@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html>
+<head><link rel="stylesheet" href="../frame/tokens.css"><script src="../frame/frame.js"></script>
+<meta charset="utf-8">
+<style>
+  .dc-wrap { display: flex; flex-direction: column; gap: 0.9rem; }
+  .dc-row { display: flex; gap: 0.9rem; flex-wrap: wrap; }
+  .dc-col { flex: 1 1 16rem; min-width: 0; }
+  .dc-panel { padding: 0.9rem; }
+  .dc-prompt { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 0.5rem; }
+  .dc-tok { font-size: 11px; line-height: 1.6; padding: 2px 6px; border-radius: 4px; background: var(--raised); color: var(--ink-dim); opacity: 0.35; transition: opacity 0.25s; white-space: nowrap; }
+  .dc-tok.read { opacity: 1; background: color-mix(in srgb, var(--accent) 18%, var(--raised)); color: var(--ink); }
+  .dc-cache { margin-top: 0.6rem; }
+  .dc-cachetrack { height: 10px; border-radius: 5px; background: var(--raised); overflow: hidden; }
+  .dc-cachefill { height: 100%; width: 0%; background: var(--info); transition: width 0.4s; }
+  .dc-controls { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; margin-top: 0.7rem; }
+  .dc-btn { font-family: var(--mono); font-size: 12px; padding: 0.35rem 0.8rem; border: 1px solid var(--line); border-radius: 6px; background: var(--raised); color: var(--ink); cursor: pointer; }
+  .dc-btn:disabled { opacity: 0.4; cursor: default; }
+  .dc-sliderrow { display: flex; align-items: center; gap: 0.5rem; font-size: 12px; color: var(--ink-dim); }
+  .dc-sliderrow input { accent-color: var(--accent); width: 7rem; }
+  .dc-capt { font-size: 12px; color: var(--ink-dim); }
+  .dc-bars { display: flex; flex-direction: column; gap: 6px; }
+  .dc-bar { display: grid; grid-template-columns: 3.2rem 1fr 3rem; align-items: center; gap: 0.5rem; font-size: 12px; }
+  .dc-barname { color: var(--ink-dim); text-align: right; }
+  .dc-bartrack { height: 14px; background: var(--raised); border-radius: 4px; overflow: hidden; }
+  .dc-barfill { height: 100%; background: var(--accent); width: 0%; opacity: 0.2; transition: width 0.35s, opacity 0.35s; }
+  .dc-bar.on .dc-barfill { opacity: 1; }
+  .dc-barval { font-size: 12px; color: var(--ink-dim); }
+  .dc-interface { display: flex; gap: 0.4rem; margin-bottom: 0.6rem; }
+  .dc-word { font-size: 15px; font-weight: 600; padding: 0.2rem 0.7rem; border-radius: 6px; background: var(--raised); display: inline-block; cursor: default; }
+  .dc-word.rollable { cursor: pointer; border: 1px dashed var(--line); }
+  .dc-word.rolled { animation: dcflip 0.25s ease; }
+  @keyframes dcflip { 0% { opacity: 0.2; transform: translateY(2px); } 100% { opacity: 1; transform: none; } }
+  .dc-out { margin-top: 0.6rem; padding: 0.6rem 0.9rem; border-radius: 6px; background: var(--raised); font-size: 12px; min-height: 3rem; line-height: 1.6; }
+  .dc-muted { color: var(--muted); }
+  .dc-lp { font-size: 12px; margin-top: 0.5rem; line-height: 1.7; color: var(--ink-dim); }
+  .dc-lp b { color: var(--ink); }
+</style>
+</head>
+<body>
+<div class="dc-wrap">
+  <figure>
+    <div class="dc-panel">
+      <div class="label">step player · one decision call through the model</div>
+      <div class="dc-prompt" id="toks"></div>
+      <div class="dc-cache">
+        <div class="label" style="margin-top:0.7rem">kv cache (built by prefill, reused by decode)</div>
+        <div class="dc-cachetrack"><div class="dc-cachefill" id="cache"></div></div>
+      </div>
+      <div class="dc-controls">
+        <button class="dc-btn" id="step">step →</button>
+        <button class="dc-btn" id="reset">reset</button>
+        <span class="dc-capt" id="stepname">0 / 4</span>
+      </div>
+    </div>
+    <figcaption class="dc-capt">Four steps: prefill reads the conversation once, scoring produces the spread, decode draws one token, and the caller gets whatever the interface returns. Click "step" to walk through.</figcaption>
+  </figure>
+
+  <div class="dc-row">
+    <div class="dc-col dc-panel">
+      <div class="label">the spread at the answer position (measured, T = 1.0, frozen)</div>
+      <div class="dc-bars" id="bars">
+        <div class="dc-bar" id="rowYes"><span class="dc-barname">Yes</span><div class="dc-bartrack"><div class="dc-barfill" id="bYes"></div></div><span class="dc-barval" id="vYes"></span></div>
+        <div class="dc-bar" id="rowNo"><span class="dc-barname">No</span><div class="dc-bartrack"><div class="dc-barfill" id="bNo"></div></div><span class="dc-barval" id="vNo"></span></div>
+      </div>
+      <p class="dc-capt" style="margin-top:0.7rem">This is the distribution the model actually computed for this prompt, from a real call. It does not move when you sample, when you change temperature, or when you re-roll the answer. The slider below does not reshape it, it changes the odds the draw uses.</p>
+    </div>
+
+    <div class="dc-col dc-panel">
+      <div class="label">what the caller receives</div>
+      <div class="dc-interface">
+        <button class="dc-btn" id="modeTxt" style="border-color:var(--accent)">text (chat API)</button>
+        <button class="dc-btn" id="modeLog">logprob readout</button>
+      </div>
+      <div class="dc-sliderrow">
+        <span>temperature</span><input type="range" id="temp" min="0" max="100" value="70"><span id="tval">0.7</span>
+      </div>
+      <div class="dc-out" id="out"><span class="dc-muted">step to the decode step to see what comes back</span></div>
+      <div class="dc-lp" id="lp" hidden>
+        The response also carried, next to the sampled word:<br>
+        <b>logprob(Yes) = −0.576</b> → P(Yes) = <b>0.562</b><br>
+        <b>logprob(No) = −0.825</b> → P(No) = <b>0.438</b>
+      </div>
+    </div>
+  </div>
+
+  <div class="dc-panel">
+    <div class="label">the whole mechanism in four lines</div>
+    <ol class="steps">
+      <li><b>Prefill:</b> the model reads the entire conversation in one pass. Attention lets every position look at the others; the result is a KV cache and a hidden state at every position. Almost all of the cost lives here when the answer is one token.</li>
+      <li><b>Scoring:</b> the final layer emits logits for every token in the vocabulary, and softmax turns them into a spread summing to 1. At the answer position the spread has P(Yes) = 0.562 and P(No) = 0.438. The model has already decided how sure it is. That number exists whether or not anyone reads it.</li>
+      <li><b>Decode:</b> the API draws one token from the spread, shaped by temperature, and emits it as text. The draw is a coin weighted by the spread, and 0.562 is a coin that lands both ways. The text is a sample from the spread, not the spread.</li>
+      <li><b>The readout:</b> the API returns the logprob of each top candidate alongside the sample. Read it, and 0.562 comes back with the answer. That is all the technique is: a field you were allowed to have.</li>
+    </ol>
+  </div>
+</div>
+
+<script>
+const PROMPT = ["[09:15]","Nurse","R.:",
+  "He","came","in","about","ten","minutes","ago.",
+  "He's","clutching","his","chest,","left","arm.","Very","pale,","sweating","a","lot.",
+  "…",
+  "Question:","Does","the","ambulance","team","need","to","know","about","this","patient","right","now?",
+  "Answer","with","Yes","or","No."].map(w => w.trim());
+const PY = 0.562; // measured, T = 1.0
+
+const toksEl = document.getElementById('toks');
+PROMPT.forEach(t => { const s = document.createElement('span'); s.className = 'dc-tok'; s.textContent = t; toksEl.appendChild(s); });
+const tokEls = [...toksEl.children];
+const cache = document.getElementById('cache');
+const stepname = document.getElementById('stepname');
+const stepBtn = document.getElementById('step');
+const out = document.getElementById('out');
+const lp = document.getElementById('lp');
+let step = 0, mode = 'txt', drawn = null;
+
+function T() { return document.getElementById('temp').value / 100; }
+function tPy() { // sampling-time P(Yes) at current temperature
+  const t = T();
+  if (t === 0) return PY > 0.5 ? 1 : 0;
+  const a = Math.exp(Math.log(PY) / t), b = Math.exp(Math.log(1 - PY) / t);
+  return a / (a + b);
+}
+function roll() { drawn = Math.random() < tPy() ? 'Yes' : 'No'; }
+function render() {
+  document.getElementById('tval').textContent = T().toFixed(1);
+  stepname.textContent = step + ' / 4';
+  stepBtn.disabled = step >= 4;
+  // prefill
+  const nRead = step === 0 ? 0 : PROMPT.length;
+  tokEls.forEach((el, i) => el.classList.toggle('read', i < nRead));
+  cache.style.width = (step === 0 ? 0 : 100) + '%';
+  // bars: appear at scoring step, frozen at measured values
+  const on = step >= 2;
+  document.getElementById('rowYes').classList.toggle('on', on);
+  document.getElementById('rowNo').classList.toggle('on', on);
+  document.getElementById('bYes').style.width = (on ? PY * 100 : 0) + '%';
+  document.getElementById('bNo').style.width = (on ? (1 - PY) * 100 : 0) + '%';
+  document.getElementById('vYes').textContent = on ? PY.toFixed(3) : '';
+  document.getElementById('vNo').textContent = on ? (1 - PY).toFixed(3) : '';
+  // interface
+  lp.hidden = mode !== 'log' || step < 3;
+  if (step < 3) {
+    out.innerHTML = '<span class="dc-muted">step to the decode step to see what comes back</span>';
+  } else if (mode === 'txt') {
+    if (step === 3 && drawn === null) roll();
+    const w = document.createElement('span');
+    w.className = 'dc-word rollable' + (step === 3 ? ' rolled' : '');
+    w.textContent = drawn;
+    w.title = 'click to draw again';
+    w.onclick = () => { roll(); w.classList.remove('rolled'); void w.offsetWidth; w.classList.add('rolled'); render(); };
+    out.innerHTML = '';
+    out.appendChild(w);
+    const note = document.createElement('span');
+    note.className = 'dc-muted';
+    const pDraw = drawn === 'Yes' ? tPy() : 1 - tPy();
+    note.innerHTML = '&nbsp;&nbsp;← the only thing you got. One draw at T = ' + T().toFixed(1) + ', where ' + drawn + ' had odds ' + pDraw.toFixed(3) + '. ' + (drawn === 'Yes'
+      ? 'It landed on the most likely token. Re-roll enough and eventually it will not.'
+      : 'The most likely token was Yes, but the draw landed on No. At these odds that happens on a large share of draws, and the chart on the left never moved. The text is the only signal you got.') + ' Click the word to draw again.';
+    out.appendChild(note);
+  } else {
+    if (step === 3 && drawn === null) roll();
+    out.innerHTML = '<span class="dc-word">' + drawn + '</span> <span class="dc-muted">← the same word ' + (drawn === 'Yes' ? '' : ', even though it was the less likely token ') + ', and this time the number came with it</span>';
+  }
+}
+stepBtn.onclick = () => { if (step < 4) { step++; if (step === 3) drawn = null; render(); } };
+document.getElementById('reset').onclick = () => { step = 0; drawn = null; render(); };
+document.getElementById('temp').oninput = render;
+document.getElementById('modeTxt').onclick = () => { mode = 'txt'; document.getElementById('modeTxt').style.borderColor = 'var(--accent)'; document.getElementById('modeLog').style.borderColor = 'var(--line)'; render(); };
+document.getElementById('modeLog').onclick = () => { mode = 'log'; document.getElementById('modeLog').style.borderColor = 'var(--accent)'; document.getElementById('modeTxt').style.borderColor = 'var(--line)'; render(); };
+render();
+</script>
+</body>
+</html>

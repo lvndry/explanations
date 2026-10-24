@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html>
+<head><link rel="stylesheet" href="../frame/tokens.css"><script src="../frame/frame.js"></script>
+<meta charset="utf-8">
+<style>
+  .f-wrap { display: flex; flex-direction: column; gap: 0.9rem; }
+  .f-panel { padding: 0.9rem; }
+  .f-axis { display: flex; gap: 0.4rem; margin-top: 0.6rem; flex-wrap: wrap; }
+  .f-rung { flex: 1 1 6.5rem; min-width: 0; }
+  .f-rungbtn { width: 100%; font-family: var(--mono); font-size: 11px; line-height: 1.4; text-align: left; padding: 0.5rem 0.6rem; border: 1px solid var(--line); border-radius: 6px; background: var(--raised); color: var(--ink); cursor: pointer; }
+  .f-rungbtn.active { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, var(--raised)); }
+  .f-rungbtn .f-dist { display: block; margin-top: 0.25rem; font-size: 11px; color: var(--muted); }
+  .f-body { margin-top: 0.8rem; display: none; }
+  .f-body.on { display: block; }
+  .f-body h4 { font-size: 13px; margin: 0 0 0.4rem 0; }
+  .f-body p { font-size: 12px; color: var(--ink-dim); line-height: 1.65; }
+  .f-body code { font-size: 11px; background: var(--raised); padding: 0 3px; border-radius: 3px; }
+  .f-spec { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 11rem), 1fr)); gap: 0.6rem; margin-top: 0.7rem; }
+  .f-specitem { padding: 0.5rem 0.6rem; background: var(--raised); border-radius: 6px; }
+  .f-specitem .label { font-size: 11px; }
+  .f-specitem p { font-size: 11px; margin: 0.2rem 0 0 0; color: var(--ink-dim); }
+  .f-callout { margin-top: 0.7rem; padding: 0.6rem 0.9rem; border-left: 3px solid var(--accent); background: var(--raised); border-radius: 0 6px 6px 0; font-size: 12px; color: var(--ink-dim); line-height: 1.6; }
+  .f-codewrap { margin-top: 0.6rem; background: var(--raised); border-radius: 6px; padding: 0.6rem 0.8rem; font-size: 11px; line-height: 1.55; overflow-x: auto; white-space: pre; color: var(--ink-dim); }
+</style>
+</head>
+<body>
+<div class="f-wrap">
+  <div class="f-panel">
+    <p style="font-size:12px; color:var(--ink-dim); line-height:1.65; margin:0">
+      Every decision model is a model you would have <b>served</b> anyway (run behind an API so other software can call it) plus some amount of change, and the change comes in two
+      forms: <b>post-training</b>, continuing the model's <b>weights</b> on new data, or a <b>head</b>, a new
+      layer trained on top of the model's hidden state. The amount of change is the whole taxonomy:
+      how far are you from the LLM you would have served anyway? Zero (you only read a field), small
+      (you retrained the same model), structural (you bolted a new head on), or total (you swapped the
+      backbone). Each step further buys something and costs something, and the next section is just
+      picking a rung.
+    </p>
+    <div class="f-axis">
+      <div class="f-rung"><button class="f-rungbtn" data-i="0">1 · logprob readout<span class="f-dist">distance: zero</span></button></div>
+      <div class="f-rung"><button class="f-rungbtn" data-i="1">2 · fine-tuned base<span class="f-dist">distance: small</span></button></div>
+      <div class="f-rung"><button class="f-rungbtn" data-i="2">3 · trained head (Jev, Clef, Kev)<span class="f-dist">distance: structural</span></button></div>
+      <div class="f-rung"><button class="f-rungbtn" data-i="3">4 · encoder (Laya)<span class="f-dist">distance: new backbone</span></button></div>
+      <div class="f-rung"><button class="f-rungbtn" data-i="4">5 · candidate head (Decision 1.0)<span class="f-dist">distance: new head, familiar backbone</span></button></div>
+    </div>
+    <div id="f-rungs"></div>
+  </div>
+
+  <div class="f-panel">
+    <div class="label">the same model family, ranked, on one benchmark</div>
+    <table>
+      <thead><tr><th>model</th><th>overall</th><th>pair accuracy</th></tr></thead>
+      <tbody>
+        <tr><td>DeepSeek-V4-Flash (plain LLM, readout)</td><td>99.8</td><td>99.8</td></tr>
+        <tr><td>Jev (Qwen, RLCD)</td><td>98.0</td><td>97.9</td></tr>
+        <tr><td>Kev-4B (Qwen3.5 + pointer head)</td><td>78.2</td><td>76.6</td></tr>
+        <tr><td>Jeff (Qwen3.5-2B fine-tuned)</td><td>70.0</td><td>67.6</td></tr>
+        <tr><td>Laya (0.6B encoder)</td><td>59.8</td><td>55.8</td></tr>
+      </tbody>
+    </table>
+    <p class="dc-capt" style="font-size:11px; color:var(--ink-dim); margin-top:0.5rem">
+      DecideBench: 400 items written by Claude, 200 of them contrastive pairs (two near-identical items
+      that differ in one detail, which should get different labels). Pair accuracy is the harder metric:
+      getting both sides of a pair right. Read it the way it was built to be read: the plain big LLM on
+      top of the board; the specialized models earn their place in-domain, and their numbers fall off a
+      cliff outside it (Jeff: 98 on support intents, 46 on returns policy).
+    </p>
+  </div>
+</div>
+
+<script>
+const RUNGS = [
+  {
+    h: "Logprob readout — distance zero",
+    p: `<p>The baseline from section 3. No new model, no new server, no training. You read the logprobs the chat API already computes, at your prompt's answer position. It is a different *interface*, not a different model: same forward pass, same speed, same context window, same accuracy ceiling as the LLM you would have run anyway. What it adds is the margin, and what it does not fix is calibration: the number tracks the model's own beliefs, which on a new task may not track reality. Section 4 is the whole story of that gap.</p>`,
+    spec: [["model", "the one you already serve"], ["speed", "identical to the LLM"], ["context", "the LLM's, unchanged"], ["labels", "prompt text — change anytime"], ["what you give up", "calibrated probabilities, every base-model failure"]]
+  },
+  {
+    h: "Fine-tuned base — small distance",
+    p: `<p>Same architecture, same serving path, but the weights are now better at your task's prompt format. The honest data point is Jeff, a fine-tuned Qwen3.5-2B: 98% on support-intent items and 46% on returns-policy items on DecideBench. Strong inside the task family it trained on, collapsed outside it. The shape of that number is the shape of every fine-tune: it moves accuracy in your domain and portability away at the same time. You also now own a training set, and it goes stale when the domain moves.</p>`,
+    spec: [["model", "your base, retrained"], ["speed", "identical to the LLM"], ["context", "the LLM's, unchanged"], ["labels", "prompt text"], ["what you give up", "cross-domain transfer; you own a training set"]]
+  },
+  {
+    h: "Trained head — structural distance. Jev, the reference implementation",
+    p: `<p>A new layer on top of a (often post-trained) backbone, trained to emit probabilities instead of tokens. This is the family with the most production detail public, so it is worth one chapter of how it actually works.</p>
+    <p><b>Jev (TypeSafe).</b> A Qwen-based model post-trained with an objective called <code>RLCD</code>, Reinforcement Learning for Calibrated Decisions: the model is trained so that the probability it *states* tracks how often it is *right*, which is the calibration property section 4 said a base LLM has no guarantee of. TypeSafe has not published the exact training recipe, so treat RLCD as a named objective with an unpublished spec. Served through a <code>/v1/decisions</code> endpoint: you send a prompt plus your labels, and it returns a <b>label logprob</b> per label, requested by name rather than read off the top of the spread, so your labels never have to be single tokens. That is the practical difference from the section-3 readout: the readout needs "Yes" and "No" to be among the ten most likely candidates, the decisions API asks for them directly by name.</p>
+    <p><b>Kev.</b> Pointer-head architecture: the model's <b>hidden state</b> is compared against a set of learned label embeddings and the best match is picked. Kev-9B runs on a 32GB-class GPU and its model card publishes a fitted temperature of 2.19 — a trained calibration constant, which is what a head family is supposed to hand you that the readout family leaves you to measure yourself.</p>
+    <p><b>Clef (Cloudflare).</b> Schema-head: one forward pass emits a whole typed object (multi-field, multi-label) with no decode. Cloudflare published what this looks like in practice: backbone frozen, LoRA adapters on top, and a training loss of label-smoothed cross-entropy plus Brier-score calibration, the first decision-model family to name its calibration recipe. Clef-omni is a Qwen3-Omni-30B-A3B mixture-of-experts that scores audio, video, images and text in the one prefill, about 130ms text / 150ms image / 1.5s for a 21-second video with audio. Weights are open, SGLang serves them from 0.5.22 (PR #42721), it speaks the Jev API (a model-ID swap), and Clef-flash is $0.038 per million input tokens hosted, 24k context hosted versus 256k in the self-hosted weights.</p>`,
+    spec: [["model", "vendor's, or yours with a head"], ["speed", "the backbone's forward pass — no speed gain"], ["context", "the backbone's"], ["labels", "head / request, per family"], ["what you give up", "a second artifact to version; the label space is a trained boundary"]]
+  },
+  {
+    h: "Encoder — new backbone. Laya",
+    p: `<p>The only rung that changes the speed class. An <b>encoder</b> reads the whole input in one pass and emits one representation; it decodes no tokens, so there is no decode loop and no grammar-constrained sampling. Laya (Laya AI, 0.6B, 512-token window) does 2-6 ms per decision and 60+ queries per second on an 8GB GPU, which is two to three orders of magnitude below a 27B decode. The cost is written all over its benchmark numbers: BANKING77 0.363 zero-shot, 0.766 fine-tuned. It must be fine-tuned per domain to be useful, its 512-token ceiling excludes long conversations (a hospital front-desk page or an Ultron turn page will not fit), and it cannot write a sentence, only score. Speed is real and the price is real too.</p>`,
+    spec: [["model", "0.6B encoder, yours to fine-tune"], ["speed", "2-6 ms — 100-300x below an LLM"], ["context", "512 tokens"], ["labels", "retrain"], ["what you give up", "long context, generative output, cross-domain reuse"]]
+  },
+  {
+    h: "Candidate head — familiar backbone, trained head. Decision 1.0",
+    p: `<p>vLLM's Semantic Router shipped six open models (Apache 2.0) in September 2026: Kai, Lex (0.6B encoders) and Eos, Sol, Nox, Lux (Qwen3.5 backbones from 0.8B to 9B with a shared candidate head). A <b>candidate head</b> scores free-text candidate descriptions you send in each request, one forward pass, 16k context. That is the hybrid slot: you keep the LLM's context window and the open, prompt-time label space, and you trade away decode and get a TypeSafe-SDK-compatible API (<code>/v1/systemone</code>) on top of vLLM. On their own 54-task suite: Jev 81.05, Lux-9B 76.94, Kev-9B 71.89, which is a different benchmark from DecideBench and only comparable within its own rows.</p>`,
+    spec: [["model", "Qwen3.5 + shared candidate head"], ["speed", "one forward pass, no decode"], ["context", "16k"], ["labels", "free text, in the request"], ["what you give up", "a second model to train, version, serve"]]
+  }
+];
+const host = document.getElementById('f-rungs');
+RUNGS.forEach((r, i) => {
+  const d = document.createElement('div');
+  d.className = 'f-body' + (i === 0 ? ' on' : '');
+  d.innerHTML = '<h4>' + r.h + '</h4>' + r.p +
+    '<div class="f-spec">' + r.spec.map(s => '<div class="f-specitem"><div class="label">' + s[0] + '</div><p>' + s[1] + '</p></div>').join('') + '</div>';
+  host.appendChild(d);
+});
+const btns = [...document.querySelectorAll('.f-rungbtn')];
+btns.forEach(b => b.onclick = () => {
+  btns.forEach(x => x.classList.remove('active'));
+  b.classList.add('active');
+  [...host.children].forEach((el, j) => el.classList.toggle('on', j == b.dataset.i));
+});
+btns[0].classList.add('active');
+</script>
+</body>
+</html>
