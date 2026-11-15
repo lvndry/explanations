@@ -2,6 +2,8 @@
 
 Published explanations, served as static pages at https://lvndry.github.io/explanations.
 
+The site root (`index.html`) lists every published explanation automatically by reading this repo's top-level folders, so nothing needs updating when a page is published.
+
 Each explanation is a folder at the repo root with an `index.html` plus its supporting files (sections, styles, scripts). Its URL is `https://lvndry.github.io/explanations/<name>`.
 
 ## How pages get here
