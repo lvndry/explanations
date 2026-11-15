@@ -1,8 +1,8 @@
 # explanations
 
-Published explanations, served as static pages at https://lvndry.github.io/explanations/.
+Published explanations, served as static pages at https://lvndry.github.io/explanations.
 
-Each explanation is a folder at the repo root with an `index.html` plus its supporting files (sections, styles, scripts). Its URL is `https://lvndry.github.io/explanations/<name>/`.
+Each explanation is a folder at the repo root with an `index.html` plus its supporting files (sections, styles, scripts). Its URL is `https://lvndry.github.io/explanations/<name>`.
 
 ## How pages get here
 
