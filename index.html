@@ -1,0 +1,285 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Explanations</title>
+<meta name="description" content="Published explanations, served as static pages.">
+<style>
+  :root {
+    --background: #faf9f6;
+    --surface: #ffffff;
+    --text: #1c1b19;
+    --muted: #6b6860;
+    --border: #e4e1d9;
+    --accent: #c2410c;
+    --shadow: 0 1px 2px rgba(28, 27, 25, 0.04), 0 8px 24px rgba(28, 27, 25, 0.04);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --background: #141412;
+      --surface: #1c1b19;
+      --text: #f1efe9;
+      --muted: #9b978d;
+      --border: #2d2b27;
+      --accent: #fb923c;
+      --shadow: none;
+    }
+  }
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0;
+    background: var(--background);
+    color: var(--text);
+    font: 16px/1.6 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  main {
+    max-width: 880px;
+    margin: 0 auto;
+    padding: 96px 24px 64px;
+  }
+  header { margin-bottom: 56px; }
+  .eyebrow {
+    margin: 0 0 16px;
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--accent);
+  }
+  h1 {
+    margin: 0 0 16px;
+    font-size: clamp(36px, 6vw, 56px);
+    line-height: 1.05;
+    letter-spacing: -0.03em;
+    font-weight: 700;
+    text-wrap: balance;
+  }
+  .lede {
+    margin: 0;
+    max-width: 52ch;
+    font-size: 18px;
+    color: var(--muted);
+    text-wrap: pretty;
+  }
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+    gap: 16px;
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+  .card {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    height: 100%;
+    padding: 24px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    box-shadow: var(--shadow);
+    color: inherit;
+    text-decoration: none;
+    transition: transform 0.18s ease, border-color 0.18s ease;
+  }
+  .card:hover { transform: translateY(-2px); border-color: var(--accent); }
+  .card:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+  .card h2 {
+    margin: 0;
+    font-size: 19px;
+    line-height: 1.3;
+    letter-spacing: -0.01em;
+    text-wrap: balance;
+  }
+  .card p {
+    margin: 0;
+    font-size: 15px;
+    color: var(--muted);
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+  .card .meta {
+    margin-top: auto;
+    padding-top: 12px;
+    font-size: 13px;
+    color: var(--muted);
+    font-variant-numeric: tabular-nums;
+  }
+  .status {
+    padding: 40px 24px;
+    text-align: center;
+    color: var(--muted);
+    border: 1px dashed var(--border);
+    border-radius: 14px;
+  }
+  .status a { color: var(--accent); }
+  footer {
+    margin-top: 72px;
+    padding-top: 24px;
+    border-top: 1px solid var(--border);
+    font-size: 14px;
+    color: var(--muted);
+  }
+  footer a { color: inherit; }
+  @media (prefers-reduced-motion: reduce) {
+    .card { transition: none; }
+    .card:hover { transform: none; }
+  }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <p class="eyebrow">Explanations</p>
+    <h1>Things worth understanding properly.</h1>
+    <p class="lede">Each page walks through one idea from the ground up, with every term defined before it is used.</p>
+  </header>
+
+  <ul class="grid" id="list" aria-live="polite"></ul>
+  <div class="status" id="status">Loading explanations…</div>
+
+  <footer>
+    Published with <a href="https://jazz-cli.vercel.app">Jazz</a> ·
+    <a href="https://github.com/lvndry/explanations">Source</a>
+  </footer>
+</main>
+
+<script>
+  const repository = "lvndry/explanations";
+  const branch = "main";
+  const listElement = document.getElementById("list");
+  const statusElement = document.getElementById("status");
+
+  function titleCase(slug) {
+    return slug.replace(/[-_]+/g, " ").replace(/^./, (letter) => letter.toUpperCase());
+  }
+
+  function formatDate(isoDate) {
+    return new Date(isoDate).toLocaleDateString(undefined, {
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+    });
+  }
+
+  async function fetchFolderNames() {
+    const response = await fetch(`https://api.github.com/repos/${repository}/git/trees/${branch}`);
+    if (!response.ok) throw new Error(`GitHub API returned ${response.status}`);
+    const tree = await response.json();
+    return tree.tree
+      .filter((entry) => entry.type === "tree" && !entry.path.startsWith("."))
+      .map((entry) => entry.path);
+  }
+
+  async function fetchPublishDates() {
+    const publishDates = new Map();
+    try {
+      const response = await fetch(
+        `https://api.github.com/repos/${repository}/commits?per_page=100`
+      );
+      if (!response.ok) return publishDates;
+      const commits = await response.json();
+      for (const commit of commits) {
+        const match = /^publish (.+)$/.exec(commit.commit.message.split("\n")[0]);
+        if (match && !publishDates.has(match[1])) {
+          publishDates.set(match[1], commit.commit.committer.date);
+        }
+      }
+    } catch {
+      return publishDates;
+    }
+    return publishDates;
+  }
+
+  async function fetchPageDetails(folderName) {
+    const fallback = { title: titleCase(folderName), description: "" };
+    try {
+      const response = await fetch(`${encodeURIComponent(folderName)}/index.html`);
+      if (!response.ok) return null;
+      const html = await response.text();
+      const parsed = new DOMParser().parseFromString(html, "text/html");
+      const title = parsed.querySelector("title")?.textContent.trim();
+      const description = parsed
+        .querySelector('meta[name="description"]')
+        ?.getAttribute("content")
+        ?.trim();
+      return { title: title || fallback.title, description: description || "" };
+    } catch {
+      return fallback;
+    }
+  }
+
+  function buildCard(folderName, details, publishDate) {
+    const item = document.createElement("li");
+    const link = document.createElement("a");
+    link.className = "card";
+    link.href = encodeURIComponent(folderName);
+
+    const heading = document.createElement("h2");
+    heading.textContent = details.title;
+    link.append(heading);
+
+    if (details.description) {
+      const description = document.createElement("p");
+      description.textContent = details.description;
+      link.append(description);
+    }
+
+    if (publishDate) {
+      const meta = document.createElement("span");
+      meta.className = "meta";
+      meta.textContent = formatDate(publishDate);
+      link.append(meta);
+    }
+
+    item.append(link);
+    return item;
+  }
+
+  async function render() {
+    try {
+      const [folderNames, publishDates] = await Promise.all([
+        fetchFolderNames(),
+        fetchPublishDates(),
+      ]);
+
+      const entries = (
+        await Promise.all(
+          folderNames.map(async (folderName) => {
+            const details = await fetchPageDetails(folderName);
+            return details ? { folderName, details } : null;
+          })
+        )
+      ).filter(Boolean);
+
+      entries.sort((first, second) => {
+        const firstDate = publishDates.get(first.folderName) || "";
+        const secondDate = publishDates.get(second.folderName) || "";
+        return secondDate.localeCompare(firstDate) || first.folderName.localeCompare(second.folderName);
+      });
+
+      if (entries.length === 0) {
+        statusElement.textContent = "Nothing published yet.";
+        return;
+      }
+
+      for (const { folderName, details } of entries) {
+        listElement.append(buildCard(folderName, details, publishDates.get(folderName)));
+      }
+      statusElement.hidden = true;
+    } catch {
+      statusElement.innerHTML =
+        'Could not load the list. Browse the <a href="https://github.com/lvndry/explanations">repository</a> instead.';
+    }
+  }
+
+  render();
+</script>
+</body>
+</html>
