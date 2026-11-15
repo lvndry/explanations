@@ -6,7 +6,7 @@ Each explanation is a folder at the repo root with an `index.html` plus its supp
 
 ## How pages get here
 
-Pages are published from a [Jazz](https://jazz-cli.vercel.app/) agent skill. Publishing copies the explanation's folder into this repo and commits it as `publish <name>`.
+Pages are published from a [Jazz](https://jazz-cli.vercel.app) agent skill. Publishing copies the explanation's folder into this repo and commits it as `publish <name>`.
 
 ## Hosting
 
